@@ -1,7 +1,7 @@
 [project]
 name = "findex"
-version = "0.1.0"
-description = "Lazy document walk, token stream, and corpus measurements"
+version = "0.2.0"
+description = "Inverted index, boolean search, and persistence"
 requires-python = ">=3.12"
 dependencies = []
 
