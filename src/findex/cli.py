@@ -303,6 +303,15 @@ def search_cmd(
         Literal["bm25", "tfidf"],
         typer.Option("--scorer"),
     ] = "bm25",
+    backend: Annotated[Literal["numpy", "loop"], typer.Option("--backend")] = "numpy",
+    mode: Annotated[
+        Literal["keyword", "semantic", "hybrid"],
+        typer.Option("--mode"),
+    ] = "keyword",
+    embeddings: Annotated[
+        Path | None,
+        typer.Option("--embeddings", help="embeddings .npy"),
+    ] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Emit JSON lines on stdout")] = False,
 ) -> None:
     if not index_path.is_file():
@@ -311,8 +320,26 @@ def search_cmd(
     hits: list[SearchResult]
     try:
         scorer = pick_scorer(scorer_name)
+        bank = None
+        if mode in ("semantic", "hybrid"):
+            emb = embeddings or Path("embeddings.npy")
+            if not emb.is_file():
+                _fail(f"embeddings not found: {emb}")
+            from findex.vectors import load_vector_bank
+
+            bank = load_vector_bank(emb)
         with open_index(index_path) as index:
-            hits = search(index, query, scorer, k)
+            index.ensure_arrays()
+            hits = search(
+                index,
+                query,
+                scorer,
+                k,
+                backend=backend,
+                mode=mode,
+                embeddings=bank,
+                scorer_name=scorer_name,
+            )
     except ValueError as exc:
         _fail(str(exc))
     except (OSError, TypeError, KeyError) as exc:
@@ -386,9 +413,30 @@ def bench_crawl_cmd() -> None:
 
 
 
+
+
+@app.command("embed")
+def embed_cmd(
+    index_path: Annotated[Path, typer.Option("--index")] = Path("index.pkl"),
+    out: Annotated[Path, typer.Option("--out")] = Path("embeddings.npy"),
+    model: Annotated[str, typer.Option("--model")] = "all-MiniLM-L6-v2",
+) -> None:
+    if not index_path.is_file():
+        _fail(f"index not found: {index_path}")
+    from findex.vectors import build_vector_bank
+
+    with open_index(index_path) as index:
+        store = build_vector_bank(index, model_name=model, out=out)
+    err.print(f"embeddings n_chunks={store.n_chunks} dim={store.dim} -> {out}")
+
+
 @app.command("serve")
 def serve_cmd(
     index: Annotated[Path, typer.Option("--index", help="Index pickle/json path")] = Path("index.pkl"),
+    embeddings: Annotated[
+        Path | None,
+        typer.Option("--embeddings", help="Optional embeddings .npy"),
+    ] = None,
     port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
     host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
     workers: Annotated[int, typer.Option("--workers", min=1)] = 1,
@@ -399,6 +447,8 @@ def serve_cmd(
     import uvicorn
 
     os.environ["INDEX_PATH"] = str(index.resolve())
+    if embeddings is not None:
+        os.environ["EMBEDDINGS_PATH"] = str(embeddings.resolve())
     # clear cached settings so INDEX_PATH is re-read
     from findex.web.config import load_config
 

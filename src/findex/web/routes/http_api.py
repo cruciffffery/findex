@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from findex.web.boundary import DocPayload, HealthPayload, SearchPayload, StatsPayload
 from findex.web.engine import fetch_doc, page_search
-from findex.web.wiring import ConfigDep, IndexDep
+from findex.web.wiring import ConfigDep, EmbedDep, IndexDep
 
 router = APIRouter(tags=["api"])
 
@@ -15,13 +15,28 @@ router = APIRouter(tags=["api"])
 @router.get("/search", response_model=SearchPayload)
 def search_route(
     index: IndexDep,
+    embeddings: EmbedDep,
     q: Annotated[str, Query(min_length=1, max_length=200)],
     k: Annotated[int, Query(ge=1, le=100)] = 10,
     scorer: Annotated[Literal["bm25", "tfidf"], Query()] = "bm25",
+    mode: Annotated[Literal["keyword", "semantic", "hybrid"], Query()] = "keyword",
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> SearchPayload:
-    # plain def: scoring is CPU work; FastAPI offloads to a thread pool
-    return page_search(index, q, k=k, scorer=scorer, page=page, page_size=k)
+    if mode in ("semantic", "hybrid") and embeddings is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="embeddings not loaded",
+        )
+    return page_search(
+        index,
+        q,
+        k=k,
+        scorer=scorer,
+        mode=mode,
+        page=page,
+        page_size=k,
+        embeddings=embeddings,
+    )
 
 
 @router.get("/docs/{doc_id}", response_model=DocPayload)
@@ -40,6 +55,7 @@ def stats_route(request: Request, index: IndexDep, settings: ConfigDep) -> Stats
         vocab_size=len(index),
         uptime_s=round(time() - started, 3),
         index_path=str(settings.index_path),
+        embeddings=getattr(request.app.state, "embeddings", None) is not None,
     )
 
 

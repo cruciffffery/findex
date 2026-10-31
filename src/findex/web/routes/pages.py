@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from findex.web.engine import fetch_doc, mark_terms, page_search
-from findex.web.wiring import IndexDep
+from findex.web.wiring import EmbedDep, IndexDep
 
 TPL = Path(__file__).resolve().parent.parent / "templates"
 jinja = Jinja2Templates(directory=str(TPL))
@@ -22,9 +22,11 @@ router = APIRouter(tags=["ui"], include_in_schema=False)
 def home_page(
     request: Request,
     index: IndexDep,
+    embeddings: EmbedDep,
     q: Annotated[str | None, Query(max_length=200)] = None,
     k: Annotated[int, Query(ge=1, le=100)] = 10,
     scorer: Annotated[Literal["bm25", "tfidf"], Query()] = "bm25",
+    mode: Annotated[Literal["keyword", "semantic", "hybrid"], Query()] = "keyword",
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> HTMLResponse:
     ctx: dict = {
@@ -32,12 +34,16 @@ def home_page(
         "q": q or "",
         "k": k,
         "scorer": scorer,
+        "mode": mode,
         "page": page,
         "payload": None,
         "pages": 0,
+        "has_embeddings": embeddings is not None,
     }
     if q:
-        payload = page_search(index, q, k=k, scorer=scorer, page=page, page_size=k)
+        payload = page_search(
+            index, q, k=k, scorer=scorer, mode=mode, page=page, page_size=k, embeddings=embeddings
+        )
         ctx["payload"] = payload
         ctx["pages"] = max(1, ceil(payload.total / payload.page_size)) if payload.total else 0
     return jinja.TemplateResponse(request, "home.html", ctx)
@@ -55,14 +61,18 @@ def browse_doc(request: Request, doc_id: int, index: IndexDep) -> HTMLResponse:
 def results_fragment(
     request: Request,
     index: IndexDep,
+    embeddings: EmbedDep,
     q: Annotated[str | None, Query(max_length=200)] = None,
     k: Annotated[int, Query(ge=1, le=100)] = 10,
     scorer: Annotated[Literal["bm25", "tfidf"], Query()] = "bm25",
+    mode: Annotated[Literal["keyword", "semantic", "hybrid"], Query()] = "keyword",
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> HTMLResponse:
     if not q:
         return HTMLResponse("")
-    payload = page_search(index, q, k=k, scorer=scorer, page=page, page_size=k)
+    payload = page_search(
+        index, q, k=k, scorer=scorer, mode=mode, page=page, page_size=k, embeddings=embeddings
+    )
     pages = max(1, ceil(payload.total / payload.page_size)) if payload.total else 0
     return jinja.TemplateResponse(
         request,
@@ -72,6 +82,7 @@ def results_fragment(
             "q": q,
             "k": k,
             "scorer": scorer,
+            "mode": mode,
             "page": page,
             "payload": payload,
             "pages": pages,

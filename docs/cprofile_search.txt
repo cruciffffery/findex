@@ -1,0 +1,11 @@
+cProfile summary (illustrative ranking from a cold `findex search` run)
+
+   ncalls  tottime  cumtime  filename:lineno(function)
+        1    0.010    0.820  cli.py:search_cmd
+        1    0.002    0.410  store.py:load_pickle
+   120000    0.180    0.310  models.py:Posting.__init__
+        1    0.050    0.200  search.py:search
+     45/1    0.090    0.150  <frozen importlib._bootstrap>
+        5    0.040    0.090  search.py:window_snippet
+
+See docs/hotspots.md for interpretation. Flame: docs/search.svg

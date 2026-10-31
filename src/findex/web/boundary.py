@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class HitOut(BaseModel):
@@ -18,6 +18,7 @@ class SearchPayload(BaseModel):
     page: int
     page_size: int
     took_ms: float
+    mode: Literal["keyword", "semantic", "hybrid"] = "keyword"
     results: list[HitOut]
 
 
@@ -33,6 +34,7 @@ class StatsPayload(BaseModel):
     vocab_size: int
     uptime_s: float
     index_path: str
+    embeddings: bool = False
 
 
 class HealthPayload(BaseModel):
@@ -46,3 +48,4 @@ class ErrPayload(BaseModel):
 
 
 ScorerName = Literal["bm25", "tfidf"]
+ModeName = Literal["keyword", "semantic", "hybrid"]

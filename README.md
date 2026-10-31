@@ -1,109 +1,165 @@
-# findex - lab 07
+# findex
 
 **Live deploy URL:** HERE INSERT THE DEPLOY URL
 
-HTTP search API + browse UI. Version **0.7.0**. Tag **`lab-07`** when you push.
+One sentence: a searchable inverted index with NumPy BM25, optional MiniLM
+semantics, hybrid RRF, and a FastAPI page anyone can open.
 
-Continues lab 06: the crawler filled a corpus; this lab puts BM25 behind FastAPI
-so anyone can query it from a browser or `curl`.
+| corpus | single-query latency | largest NumPy speedup |
+|---:|---:|---:|
+| **15** Gutenberg docs (~11.5k terms) | ~**37 ms** local `/search?q=alice` | **9.9x** on 40k synthetic postings |
+
+Version **1.0.0**. Public GitHub tags: **`lab-08`** and **`v1.0.0`**.
+
+**GIF (search UI):** HERE INSERT THE DEMO GIF  
+(placeholder file: `docs/demo.gif` - replace with a real screen capture)
+
+**Demo video (2-3 min):** HERE INSERT THE DEMO VIDEO URL
+
+```mermaid
+flowchart LR
+  corpus --> crawler --> tokenizer --> index --> scorer --> api --> ui
+  index --> embed --> api
+```
+
+Path: corpus (lab 1) → crawler (lab 6) → tokenizer (labs 1-2) → index/scorer
+(labs 2-3, NumPy in lab 8) → embed (lab 8) → API/UI (labs 7-8).
+
+## Run
 
 ```bash
 uv sync --all-groups
 findex index src/resources --out index.pkl
+findex search index.pkl "alice rabbit" --backend numpy
 findex serve --index index.pkl --port 8000
-# open http://127.0.0.1:8000/
 uv run pytest
-uv run python scripts/bench_handlers.py
+uv run python scripts/bench_numpy_scorer.py
 ```
 
-## Continuity
-
-| lab | adds |
-|-----|------|
-| 01-03 | corpus → inverted index → ranking |
-| 04 | types, pytest, typer/rich CLI |
-| 05 | parallel index build, GIL benchmarks |
-| 06 | asyncio crawl → JSONL |
-| 07 | FastAPI / Pydantic / Jinja+htmx UI, Docker, load numbers |
-
-## API
-
-- `GET /search?q=&k=&scorer=&page=` - validated params, paginated hits
-- `GET /docs/{doc_id}` - document body (404 if unknown)
-- `GET /stats` - docs / vocab / uptime
-- `GET /health` - `ok`, or **503** while the index is missing
-- OpenAPI: `/docs`
-
-Index loads once in **lifespan** from `INDEX_PATH` (`pydantic-settings`).
-Pydantic models sit only on the wire; scoring still uses Lab 2-3 dataclasses.
-Unexpected errors log a request id and return a bare 500 (no stack).
-
-`findex serve [--port 8000] [--workers N]` wraps uvicorn.
-
-## UI
-
-Dark sidebar layout. `GET /` - search box, highlighted snippets, scores,
-pagination, document page at `GET /doc/{doc_id}`. Optional **htmx** fragment at
-`/fragment/results` updates the result panel without a full reload.
-
-## Tests
-
-`TestClient` + `dependency_overrides` (no real index file on disk for the suite):
-
-- search 200
-- bad `k` → 422
-- missing doc → 404
-- unloaded index → `/health` 503
-
-## def vs async def
-
-`/search` does CPU scoring. Kept as plain **`def`** so FastAPI runs it in a thread
-pool instead of blocking the event loop.
-
-20 concurrent requests (`scripts/bench_handlers.py`, `time.sleep(0.05)` as a
-blocking stand-in):
-
-| mode | wall |
-|---|---|
-| `async def` (blocks the loop) | **1.22 s** |
-| `def` (thread pool) | **0.76 s** |
-
-## Docker
-
-Multi-stage image from `uv.lock`, non-root user, index baked at
-`/app/deploy/index.pkl`.
+Semantic / hybrid:
 
 ```bash
-docker build -t findex .
-docker run --rm -e INDEX_PATH=/app/deploy/index.pkl -p 8000:8000 findex
+uv sync --group semantic
+findex embed --index index.pkl --out embeddings.npy --model all-MiniLM-L6-v2
+findex serve --index index.pkl --embeddings embeddings.npy
 ```
 
-## Deploy
+`mode=keyword|semantic|hybrid` in CLI (`--mode`), API (`?mode=`), and the UI.
 
-1. HERE INSERT THE DEPLOY URL on the first line of this README.
-2. Env: `INDEX_PATH`, optional `PORT`, `LOG_LEVEL`.
-3. Platform health check: `/health`.
-4. Deployed load numbers: HERE INSERT DEPLOYED OHA / LOAD NUMBERS
+## Profile (before NumPy)
 
-## Load test
+`docs/hotspots.md` · `docs/cprofile_search.txt` · flame `docs/search.svg`
 
-Client: `scripts/load_search.py` (same columns as `oha`: RPS, p50 / p95 / p99).
-Query `q=alice`, concurrency 20, 200 requests (local).
+Top three hotspots written **before** the NumPy patch:
 
-| Target | RPS | p50 (ms) | p95 | p99 |
-|---|---|---|---|---|
-| local, 1 worker, `async def` (blocking stand-in; see handler bench) | ~8.6 | ~2200 | ~3100 | ~3400 |
-| local, 1 worker, `def` | **13.8** | **1388** | **2045** | **2217** |
-| local, 4 workers | **13.7** | **1417** | **1680** | **1780** |
-| deployed (HERE INSERT THE DEPLOY URL) | - | - | - | - |
+1. Pickle restore of many `Posting` objects - Python + native pickle.
+2. Cold CLI imports - Python; not the API hot path.
+3. Snippet disk reads per hit - native I/O + Python strings (NumPy does not fix this).
 
-**Reading the table (labs 5-6):** a blocking `async def` parks the event loop
-(lab 6). Plain `def` offloads to a thread pool; the GIL (lab 5) still serializes
-bytecode in one process - which is why 4 workers barely moved RPS on this small
-index while p99 tightened a bit.
+Postings: int32 doc_ids / tfs, one int32 length vector. BM25/TF-IDF as array
+ops, top-k via `np.argpartition`. Ranking matches lab 3
+(`tests/test_numpy_ranking.py`). `pytest-benchmark` on search / build_index in CI.
 
-## Reflection
+## Consolidated measurements (labs 1-8)
 
-1. Trace curl → Uvicorn → ASGI → FastAPI → Pydantic → your route.
-2. Why is `/search` a `def`, and what breaks if it is a blocking `async def`?
-3. What should `/health` return before lifespan finishes loading the index?
+### Lab 1 - streaming vs eager
+
+| mode | docs | tokens | vocab | time (s) | peak (KiB) |
+|---|---:|---:|---:|---:|---:|
+| streaming | 13 | 29773 | 3130 | 0.0776 | 716.7 |
+| eager | 13 | 29773 | 3130 | 0.0533 | 2070.6 |
+
+### Lab 2 - postings memory / merge vs set
+
+| representation | peak (KiB) | pickle (bytes) | load (s) |
+|---|---:|---:|---:|
+| plain dataclass | 15706.7 | 538067 | 0.0128 |
+| slots=True | 15370.7 | 430756 | 0.0382 |
+| array('I') pairs | 16123.4 | 659565 | 0.0112 |
+
+| pair | query | engine | mean (s) |
+|---|---|---|---:|
+| rare | `0 108` | merge | 0.00000085 |
+| rare | `0 108` | set | 0.00000100 |
+| common | `and the` | merge | 0.00000060 |
+| common | `and the` | set | 0.00000059 |
+
+### Lab 3 - BM25 checks + precision@5 mean
+
+Rare `cheshire` (df=1) weight at tf=1: **1.5295** vs `elizabeth` (df=2): **0.5645**.  
+Ten labeled queries, TF-IDF and BM25 mean precision@5: **0.20**.
+
+### Lab 4 - packaging
+
+Version **0.4.0**, ~50 pytest, ~92% coverage, pyright strict, CI.
+
+### Lab 5 - GIL (serial wall ~0.21 s on 15 docs)
+
+Threads do not beat serial under GIL on this corpus; processes lose to spawn cost.
+Free-threaded 3.13t still no clear win here (short jobs).
+
+### Lab 6 - crawl (`books.toscrape.com`, max_pages=200)
+
+| concurrency | wall (s) | pages/s | peak RSS |
+|---:|---:|---:|---|
+| 1 | 109.56 | 1.83 | 41.6 MiB |
+| 5 | 55.82 | 3.58 | 42.6 MiB |
+| 20 | 56.27 | 3.55 | 43.6 MiB |
+
+### Lab 7 - web handlers + load
+
+| mode | 20 concurrent wall |
+|---|---:|
+| blocking `async def` | 1.22 s |
+| `def` (thread pool) | 0.76 s |
+
+Load (`scripts/load_search.py`, c=20, n=200, 1 worker `def`): RPS **13.8**, p50 **1388** ms, p95 **2045** ms, p99 **2217** ms.
+
+Deployed load row: HERE INSERT DEPLOYED OHA / LOAD NUMBERS
+
+### Lab 8 - NumPy speedup
+
+Full table: [`docs/numpy_speedup.md`](docs/numpy_speedup.md)
+
+| Query | Docs matched | Lab 3 loop (ms) | NumPy (ms) | Speedup |
+|---|---:|---:|---:|---:|
+| common (`the`) | 15 | 0.014 | 0.038 | 0.4x |
+| rare (`carroll`) | 1 | 0.004 | 0.031 | 0.1x |
+| 3-term (`alice white rabbit`) | 7 | 0.022 | 0.086 | 0.3x |
+| synthetic-40k (`common`) | 40000 | 35.486 | 3.583 | **9.9x** |
+
+Tiny lists: overhead dominates (speedup under 1x). Long lists: ufuncs win.
+
+Precision@5 keyword / semantic / hybrid (+ paraphrases): [`docs/precision_at_5.md`](docs/precision_at_5.md).  
+Exact cells after `findex embed`: HERE INSERT PRECISION TABLE RESULTS IF RE-RUN
+
+## Limitations
+
+- Tiny corpora undersell NumPy; use long posting lists for honest speedups.
+- Brute-force `E @ q` is fine under ~1e5 chunks; then HNSW/FAISS.
+- Snippets still hit disk unless text is cached at load.
+- Without embeddings, semantic/hybrid stay disabled.
+- py-spy may fail on some Windows hosts - keep the cProfile flame in `docs/`.
+
+## Deploy checklist
+
+See **[DEPLOY.md](DEPLOY.md)** for the full Render setup.
+
+1. HERE INSERT THE DEPLOY URL at the top of this file.
+2. GitHub main must include this code (and ideally deploy/embeddings.npy).
+3. Render: Language **Docker**, health /health.
+4. Env: INDEX_PATH=/app/deploy/index.pkl, EMBEDDINGS_PATH=/app/deploy/embeddings.npy, LOG_LEVEL=INFO (do not hardcode PORT).
+5. Image / release: **v1.0.0**. Git tags: **lab-08**, **1.0.0**.
+
+## Defence (5 minutes)
+
+Prepared talking points:
+
+1. **Live demo** - open the deploy URL (or local `findex serve`), search keyword then hybrid.
+2. **One measurement to show** - NumPy **9.9x** on 40k synthetic postings (`docs/numpy_speedup.md`), and why the 15-doc rows are under 1x.
+3. **One bug that taught something** - snippet I/O dominating the profile while BM25 looked "slow" until cProfile separated Python vs disk.
+4. **Reflection (pick 2-3):**
+   - Why can NumPy lose on a rare term with df=1?
+   - Why RRF instead of adding raw BM25 and cosine scores?
+   - Which hotspot was Python time vs native I/O in your profile?
+   - `cProfile` vs `py-spy` vs Scalene - which attaches to a live process?

@@ -1,5 +1,5 @@
 {% if payload %}
-<p class="meta">{{ payload.total }} match{% if payload.total != 1 %}es{% endif %} · {{ "%.1f"|format(payload.took_ms) }} ms · page {{ payload.page }}</p>
+<p class="meta">{{ payload.total }} match{% if payload.total != 1 %}es{% endif %} · {{ "%.1f"|format(payload.took_ms) }} ms · {{ payload.mode }} · page {{ payload.page }}</p>
 {% if payload.results %}
 <ol class="list" start="{{ (payload.page - 1) * payload.page_size + 1 }}">
   {% for hit in payload.results %}
@@ -15,11 +15,11 @@
 {% if pages > 1 %}
 <nav class="pager">
   {% if page > 1 %}
-  <a href="/?q={{ q|urlencode }}&amp;k={{ k }}&amp;scorer={{ scorer }}&amp;page={{ page - 1 }}">Previous</a>
+  <a href="/?q={{ q|urlencode }}&amp;k={{ k }}&amp;scorer={{ scorer }}&amp;mode={{ mode }}&amp;page={{ page - 1 }}">Previous</a>
   {% endif %}
   <span>{{ page }} / {{ pages }}</span>
   {% if page < pages %}
-  <a href="/?q={{ q|urlencode }}&amp;k={{ k }}&amp;scorer={{ scorer }}&amp;page={{ page + 1 }}">Next</a>
+  <a href="/?q={{ q|urlencode }}&amp;k={{ k }}&amp;scorer={{ scorer }}&amp;mode={{ mode }}&amp;page={{ page + 1 }}">Next</a>
   {% endif %}
 </nav>
 {% endif %}

@@ -5,9 +5,9 @@ from time import perf_counter
 
 from findex.corpus import read_text
 from findex.models import Index, SearchResult
-from findex.score import pick_scorer
 from findex.search import search as ranked_search
-from findex.web.boundary import DocPayload, HitOut, SearchPayload, ScorerName
+from findex.vectors import VectorBank
+from findex.web.boundary import DocPayload, HitOut, ModeName, SearchPayload, ScorerName
 
 HIT_CAP = 100
 
@@ -18,12 +18,22 @@ def page_search(
     *,
     k: int = 10,
     scorer: ScorerName = "bm25",
+    mode: ModeName = "keyword",
     page: int = 1,
     page_size: int = 10,
+    embeddings: VectorBank | None = None,
 ) -> SearchPayload:
     size = min(max(k, 1), page_size)
     t0 = perf_counter()
-    hits = ranked_search(index, query, pick_scorer(scorer), k=HIT_CAP)
+    hits = ranked_search(
+        index,
+        query,
+        k=HIT_CAP,
+        backend="numpy",
+        mode=mode,
+        embeddings=embeddings,
+        scorer_name=scorer,
+    )
     took_ms = (perf_counter() - t0) * 1000.0
     total = len(hits)
     start = (page - 1) * size
@@ -34,6 +44,7 @@ def page_search(
         page=page,
         page_size=size,
         took_ms=round(took_ms, 3),
+        mode=mode,
         results=[_as_hit(h) for h in window],
     )
 
@@ -62,7 +73,6 @@ def _body(path_str: str) -> str:
 
 
 def mark_terms(snippet: str) -> str:
-    # Lab-3 "[term]" markers → <mark> for the HTML page
     parts: list[str] = []
     i = 0
     while i < len(snippet):

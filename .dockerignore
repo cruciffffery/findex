@@ -1,10 +1,21 @@
-.venv
-.git
-.pytest_cache
-.ruff_cache
-.hypothesis
-__pycache__
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.mypy_cache/
 *.pyc
-data/bench
+.git/
+.github/
+tests/
+scripts/
+docs/
 *.png
-.idea
+speedup*.png
+crawl.log
+data/bench/
+data/crawl*.jsonl
+index.pkl
+index.json
+# keep deploy/ embeddings if present; ignore local root copies unless needed
+# (root embeddings.npy IS copied by Dockerfile if present — allow it)

@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 
 from findex.models import Index
+from findex.vectors import VectorBank
 from findex.web.config import AppConfig, load_config
 
 
@@ -22,5 +23,10 @@ def require_index(request: Request) -> Index:
     return index
 
 
+def optional_embeddings(request: Request) -> VectorBank | None:
+    return getattr(request.app.state, "embeddings", None)
+
+
 ConfigDep = Annotated[AppConfig, Depends(require_config)]
 IndexDep = Annotated[Index, Depends(require_index)]
+EmbedDep = Annotated[VectorBank | None, Depends(optional_embeddings)]

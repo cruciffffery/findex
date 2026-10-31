@@ -14,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from findex.models import Index
 from findex.store import load_json, load_pickle
 from findex.web.config import AppConfig, load_config
+from findex.vectors import load_vector_bank
 from findex.web.routes.http_api import router as api_router
 from findex.web.routes.pages import router as page_router
 
@@ -52,15 +53,28 @@ def make_app(settings: AppConfig | None = None, *, load_on_startup: bool = True)
             level=getattr(logging, cfg.log_level.upper(), logging.INFO),
             format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
         )
+        app.state.embeddings = None
         if load_on_startup:
             app.state.index = open_index_file(cfg.index_path)
+            app.state.index.ensure_arrays()
             log.info("index ready path=%s docs=%s", cfg.index_path, app.state.index.num_docs)
+            emb_path = Path(cfg.embeddings_path) if cfg.embeddings_path else None
+            if emb_path is not None and emb_path.is_file():
+                app.state.embeddings = load_vector_bank(emb_path)
+                log.info(
+                    "embeddings ready chunks=%s dim=%s",
+                    app.state.embeddings.n_chunks,
+                    app.state.embeddings.dim,
+                )
+            elif emb_path is not None:
+                log.warning("EMBEDDINGS_PATH set but missing: %s", emb_path)
         yield
         app.state.index = None
+        app.state.embeddings = None
 
     app = FastAPI(
         title="findex search",
-        version="0.7.0",
+        version="1.0.0",
         description="HTTP search API and browse UI",
         lifespan=lifespan,
     )

@@ -16,6 +16,7 @@ class AppConfig(BaseSettings):
     )
 
     index_path: Path = Field(default=Path("index.pkl"), validation_alias="INDEX_PATH")
+    embeddings_path: Path | None = Field(default=None, validation_alias="EMBEDDINGS_PATH")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     port: int = Field(default=8000, validation_alias="PORT")
     page_size: int = Field(default=10, ge=1, le=50, validation_alias="PAGE_SIZE")
