@@ -1,69 +1,96 @@
-# findex — lab 02
+# findex — lab 03
 
-Continues lab 01’s `DocumentWalker` / `tokenize` pipeline. Builds an inverted
-index over `src/resources/*.txt` (Alice, Frankenstein, Pride & Prejudice) —
-**one `.txt` file = one document**.
+Continues lab 02’s inverted index. Ranked search over `src/resources/*.txt` —
+**one `.txt` file = one document** (Alice, Frankenstein, Pride & Prejudice).
+Adds `Index` as a Mapping, BM25/TF-IDF, query AST, snippets, `@timed` / cache.
 
 ```bash
-# from repo root (after uv sync)
-uv run python -m findex.index src/resources --out index.pkl
-uv run python -m findex.search index.pkl "elizabeth darcy" --engine merge
-uv run python src/main.py   # rebuild + memory / bench / save-load tables
+uv sync --group dev
+uv run python src/main.py
 ```
 
+`main.py` builds the index, prints the checks below, then runs the demo query twice
+inside `with open_index`.
 
-## Layout
+## Index
 
-- `src/findex/corpus.py` — `DocumentWalker.iter_docs()` (lazy, one file at a time)
-- `src/findex/models.py` — `Posting`, `DocMeta` (`frozen=True`, `slots=True`)
-- `src/findex/index.py` — single pass with `defaultdict` + `Counter`
-- `src/findex/search.py` — AND / OR / NOT, `--engine {merge,set}`
-- `src/findex/store.py` — pickle + json
-- `src/main.py` — measurement entry point
+`WITH_POSITIONS = True`. One build:
 
-## Memory (tracemalloc)
+`Index(terms=11_566, docs=3)` — 238869 tokens, 0.9396 s, peak 19273.1 KiB.
 
-Same corpus: 3 docs, 238869 tokens, 11566 terms. File size and load time are pickle. Load time is the median of 5.
+## Ranking checks (BM25, k1=1.5, b=0.75)
 
-| representation | peak (KiB) | file (bytes) | load (s) |
-|----------------|------------|--------------|----------|
-| plain dataclass | 15706.7 | 538067 | 0.0128 |
-| `slots=True` | 15370.7 | 430756 | 0.0382 |
-| `array('I')` pairs | 16123.4 | 659565 | 0.0112 |
+Same tf and the same document length. Only `df` changes. `cheshire` is in one book,
+`elizabeth` in two.
 
-**Where the bytes went:** slotted `Posting` objects drop the per-instance `__dict__`, so peak falls from 15706.7 KiB (plain) to 15370.7 KiB. Plain pickle is larger for the same reason. The `array('I')` row stores raw ints, but every term still owns two array headers; with many short posting lists that header tax dominates, so peak (16123.4 KiB) and pickle size (659565) sit above the slotted object layout on this corpus.
+| term | df | weight at tf=1 |
+|------|----|----------------|
+| cheshire | 1 | 1.5295 |
+| elizabeth | 2 | 0.5645 |
 
-## merge vs set
+The rare term weighs more.
 
-Mean of 200000 `search()` calls. `term term` is AND.
+Marginal gain for `cheshire` on the shortest document’s length. The 20th occurrence
+adds 0.0053; the first added 1.5295.
 
-| pair | query | tf | engine | mean (s) |
-|------|-------|----|--------|----------|
-| rare | `0 108` | 1, 1 | merge | 0.00000085 |
-| rare | `0 108` | 1, 1 | set | 0.00000100 |
-| common | `and the` | 7807, 11072 | merge | 0.00000060 |
-| common | `and the` | 7807, 11072 | set | 0.00000059 |
+| tf | weight | step from tf−1 |
+|----|--------|----------------|
+| 1 | 1.5295 | 1.5295 |
+| 2 | 1.9648 | 0.4353 |
+| 20 | 2.6414 | 0.0053 |
+| 21 | 2.6463 | 0.0048 |
 
-On rare one-doc terms, merge wins: `set` still allocates two hash sets for a tiny AND. On the common pair the times are essentially tied (set slightly ahead here).
+Same term, tf 1. The short book wins at `b=0.75`. At `b=0` the length term drops out
+and the weights match.
 
-## Save / load
+| document | tokens | b=0.75 | b=0 |
+|----------|--------|--------|-----|
+| alice_in_wonderland | 29773 | 1.5295 | 1.0986 |
+| pride_and_prejudice | 130791 | 0.8522 | 1.0986 |
 
-Slots index, positions off. Times are the median of 5.
+## precision@5
 
-| format | size (bytes) | save (s) | load (s) |
-|--------|--------------|----------|----------|
-| pickle | 430736 | 0.0272 | 0.0278 |
-| json | 310175 | 0.0166 | 0.0221 |
+Ten hand-labeled queries. A hit counts when the labeled book is in the top 5.
+Precision divides by 5. Each query has one labeled book and that book is the only
+hit, so every cell is 1/5 = 0.20. Three documents cannot push a retrieved hit past
+rank 5, so TF-IDF and BM25 tie.
 
-`pickle.load` executes whatever the blob asks for. Only load an index this program wrote.
+| query | TF-IDF | BM25 |
+|-------|--------|------|
+| alice | 0.20 | 0.20 |
+| hatter | 0.20 | 0.20 |
+| cheshire | 0.20 | 0.20 |
+| "white rabbit" | 0.20 | 0.20 |
+| frankenstein | 0.20 | 0.20 |
+| walton | 0.20 | 0.20 |
+| creature | 0.20 | 0.20 |
+| elizabeth | 0.20 | 0.20 |
+| darcy | 0.20 | 0.20 |
+| "pride and prejudice" | 0.20 | 0.20 |
+| **mean** | **0.20** | **0.20** |
 
-## Positions
+## @timed and cache
 
-`--positions` on `python -m findex.index` (off by default).
+`logging` at DEBUG. `assemble`, `load_pickle`, `_unpickle`, and `search` log milliseconds.
+The demo query runs twice on the loaded index. The second call logs `cache hit` and
+`CacheInfo(hits=1, misses=1)`.
 
-| positions | peak (KiB) | pickle (bytes) |
-|-----------|------------|----------------|
-| off | 15075.0 | 430736 |
-| on | 19276.7 | 1326575 |
+```text
+assemble took 939.3 ms
+_unpickle took 36.7 ms
+cache miss (frankenstein OR hatter) AND alice NOT darcy "white rabbit"
+search took 1.5 ms
+cache hit (frankenstein OR hatter) AND alice NOT darcy "white rabbit"
+search took 1.4 ms
+cache CacheInfo(hits=1, misses=1, maxsize=256, currsize=1)
+```
 
-Peak jumps from 15075.0 KiB to 19276.7 KiB: every token offset becomes a Python `int` hanging off each posting.
+## Demo query
+
+`(frankenstein OR hatter) AND alice NOT darcy "white rabbit"` with BM25.
+Frankenstein and Pride drop out; only Alice matches the conjunction + phrase.
+Snippets are ±80 characters; matched terms are in `[brackets]`.
+
+| rank | score | title | snippet |
+|------|-------|-------|---------|
+| 1 | 8.1460 | alice_in_wonderland | …The Project Gutenberg eBook of [Alice]'s Adventures in Wonderland… |

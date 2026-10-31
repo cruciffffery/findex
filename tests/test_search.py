@@ -1,5 +1,5 @@
 from findex.models import DocMeta, Index, Posting
-from findex.search import search
+from findex.search import boolean_search as search
 from findex.store import load_json, load_pickle, save_json, save_pickle
 
 

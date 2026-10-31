@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import gc
 import tracemalloc
 from array import array
@@ -9,15 +8,18 @@ from pathlib import Path
 from time import perf_counter
 
 from findex.corpus import DocumentWalker
+from findex.deco import timed
 from findex.models import DocMeta, Index, Posting, PostingPlain
-from findex.store import pickle_size_and_load, save_json, save_pickle, timed_save_load
+from findex.store import pickle_size_and_load, timed_save_load
 from findex.tokenize import WordStream
 
-DEFAULT_CORPUS = Path(__file__).resolve().parents[1] / "resources"
-DEFAULT_OUT = Path(__file__).resolve().parents[2] / "index.pkl"
-KEEP_POSITIONS = False
+CORPUS = Path(__file__).resolve().parents[1] / "resources"
+OUT_PKL = Path(__file__).resolve().parents[2] / "index.pkl"
+OUT_JSON = Path(__file__).resolve().parents[2] / "index.json"
+WITH_POSITIONS = True  # phrase queries need token offsets
 
 
+@timed
 def assemble(
     walker: DocumentWalker,
     words: WordStream,
@@ -86,72 +88,19 @@ def _peak_kib(factory):
     return obj, peak / 1024
 
 
-def positions_cost() -> None:
-    walker, words = DocumentWalker(DEFAULT_CORPUS), WordStream()
-    for flag in (False, True):
-        index, peak = _peak_kib(lambda flag=flag: assemble(walker, words, with_positions=flag))
-        size, load_s = pickle_size_and_load(index)
-        print(f"positions={flag} peak={peak:.1f}KiB pickle={size} load={load_s:.4f}s")
-        del index
-        gc.collect()
-
-
-def memory_study() -> None:
-    walker, words = DocumentWalker(DEFAULT_CORPUS), WordStream()
-    for kind in ("plain", "slots", "array"):
-        obj, peak = _peak_kib(lambda kind=kind: assemble_variant(walker, words, kind))
-        size, load_s = pickle_size_and_load(obj)
-        print(f"{kind} peak={peak:.1f}KiB file={size} load={load_s:.4f}s")
-        del obj
-        gc.collect()
-
-
-def build_and_save(
-    corpus: Path,
-    out: Path,
-    *,
-    with_positions: bool = False,
-    fmt: str = "pickle",
-) -> Index:
-    walker, words = DocumentWalker(corpus), WordStream()
+def main() -> Index:
+    walker, words = DocumentWalker(CORPUS), WordStream()
     tracemalloc.start()
     t0 = perf_counter()
-    index = assemble(walker, words, with_positions=with_positions)
+    index = assemble(walker, words, with_positions=WITH_POSITIONS)
     elapsed = perf_counter() - t0
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
-
-    if fmt == "json":
-        save_json(index, out)
-    else:
-        save_pickle(index, out)
-
     print(
-        f"docs={len(index.doc_meta)} terms={len(index.postings)} "
-        f"tokens={sum(index.doc_lengths.values())} "
+        f"{index!r} tokens={sum(index.doc_lengths.values())} "
         f"time={elapsed:.4f}s peak={peak / 1024:.1f}KiB"
     )
-    print(f"saved {out} ({out.stat().st_size} bytes)")
-    return index
-
-
-def main(argv: list[str] | None = None) -> Index:
-    parser = argparse.ArgumentParser(prog="python -m findex.index")
-    parser.add_argument("corpus", type=Path, nargs="?", default=DEFAULT_CORPUS)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--positions", action="store_true", default=KEEP_POSITIONS)
-    parser.add_argument("--format", choices=("pickle", "json"), default="pickle")
-    args = parser.parse_args(argv)
-
-    index = build_and_save(
-        args.corpus,
-        args.out,
-        with_positions=args.positions,
-        fmt=args.format,
-    )
-    sibling = args.out.with_suffix(".json") if args.format == "pickle" else args.out.with_suffix(".pkl")
-    if args.format == "pickle":
-        timed_save_load(index, args.out, sibling)
+    timed_save_load(index, OUT_PKL, OUT_JSON)
     return index
 
 

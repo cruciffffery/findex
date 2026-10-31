@@ -4,9 +4,11 @@ import json
 import os
 import pickle
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter
 
+from findex.deco import timed
 from findex.models import DocMeta, Index, Posting
 
 
@@ -14,9 +16,24 @@ def save_pickle(obj, path: Path) -> None:
     path.write_bytes(pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
 
 
+@timed
 def load_pickle(path: Path):
     # pickle can run arbitrary code on load — only open files this build wrote
     return pickle.loads(path.read_bytes())
+
+
+@timed
+def _unpickle(raw: bytes):
+    return pickle.loads(raw)
+
+
+@contextmanager
+def open_index(path: Path):
+    handle = path.open("rb")
+    try:
+        yield _unpickle(handle.read())
+    finally:
+        handle.close()
 
 
 def save_json(index: Index, path: Path) -> None:
