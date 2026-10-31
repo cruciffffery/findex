@@ -1,0 +1,10 @@
+{% extends "layout.html" %}
+{% block title %}{{ doc.title }} — findex{% endblock %}
+{% block body %}
+  <article class="panel doc">
+    <p class="crumb"><a href="/">← search</a></p>
+    <h1>{{ doc.title }}</h1>
+    <p class="path">{{ doc.path }}</p>
+    <pre class="body">{{ doc.text }}</pre>
+  </article>
+{% endblock %}

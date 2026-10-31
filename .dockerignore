@@ -1,0 +1,10 @@
+.venv
+.git
+.pytest_cache
+.ruff_cache
+.hypothesis
+__pycache__
+*.pyc
+data/bench
+*.png
+.idea

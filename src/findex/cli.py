@@ -385,5 +385,32 @@ def bench_crawl_cmd() -> None:
     run_bench_crawl()
 
 
+
+@app.command("serve")
+def serve_cmd(
+    index: Annotated[Path, typer.Option("--index", help="Index pickle/json path")] = Path("index.pkl"),
+    port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    workers: Annotated[int, typer.Option("--workers", min=1)] = 1,
+    reload: Annotated[bool, typer.Option("--reload")] = False,
+) -> None:
+    import os
+
+    import uvicorn
+
+    os.environ["INDEX_PATH"] = str(index.resolve())
+    # clear cached settings so INDEX_PATH is re-read
+    from findex.web.config import load_config
+
+    load_config.cache_clear()
+    uvicorn.run(
+        "findex.web:app",
+        host=host,
+        port=port,
+        workers=workers if not reload else 1,
+        reload=reload,
+    )
+
+
 if __name__ == "__main__":
     app()

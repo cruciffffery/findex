@@ -1,100 +1,109 @@
-# findex — lab 06
+# findex - lab 07
 
-![CI](https://img.shields.io/badge/CI-GitHub%20Actions-0A7A0A)
+**Live deploy URL:** HERE INSERT THE DEPLOY URL
 
-Continues lab 05. Indexing was CPU-bound; crawling waits on the network, so one
-event-loop thread can keep many HTTP requests in flight.
+HTTP search API + browse UI. Version **0.7.0**. Tag **`lab-07`** when you push.
+
+Continues lab 06: the crawler filled a corpus; this lab puts BM25 behind FastAPI
+so anyone can query it from a browser or `curl`.
 
 ```bash
 uv sync --all-groups
-findex crawl https://books.toscrape.com/ --max-pages 200 --concurrency 20 --per-host 2 --out data/crawl.jsonl --log crawl.log
-findex index data/crawl.jsonl --out index.pkl --executor serial
-findex search index.pkl "fiction" --k 5
-uv run python -m findex.bench_crawl
+findex index src/resources --out index.pkl
+findex serve --index index.pkl --port 8000
+# open http://127.0.0.1:8000/
 uv run pytest
+uv run python scripts/bench_handlers.py
 ```
-
-Version **0.6.0**. Tag **`lab-06`** when you push.
 
 ## Continuity
 
 | lab | adds |
 |-----|------|
-| 01–03 | corpus → inverted index → ranking |
+| 01-03 | corpus → inverted index → ranking |
 | 04 | types, pytest, typer/rich CLI |
 | 05 | parallel index build, GIL benchmarks |
-| 06 | asyncio crawl (`TaskGroup`, semaphores, robots, retries) → JSONL → index |
+| 06 | asyncio crawl → JSONL |
+| 07 | FastAPI / Pydantic / Jinja+htmx UI, Docker, load numbers |
 
-## Permission / ethics
+## API
 
-Crawl target: **https://books.toscrape.com/** — a public practice bookstore built
-for scraping tutorials.
+- `GET /search?q=&k=&scorer=&page=` - validated params, paginated hits
+- `GET /docs/{doc_id}` - document body (404 if unknown)
+- `GET /stats` - docs / vocab / uptime
+- `GET /health` - `ok`, or **503** while the index is missing
+- OpenAPI: `/docs`
 
-- `robots.txt` returns **404** on this host; empty rules → allow-all under
-  `urllib.robotparser` (still polite: allowlist, caps, delays).
-- User-Agent: `findex-crawler/0.6 (+mailto:crawl-lab@example.org; books.toscrape practice crawl)`
-- Allowlist: `books.toscrape.com` only
-- Cap: `--max-pages` (benchmarks use **200**)
-- Global concurrency + `--per-host` / `--host-delay` so one origin is not hammered
+Index loads once in **lifespan** from `INDEX_PATH` (`pydantic-settings`).
+Pydantic models sit only on the wire; scoring still uses Lab 2-3 dataclasses.
+Unexpected errors log a request id and return a bare 500 (no stack).
 
-## Benchmark (same seed, max_pages=200)
+`findex serve [--port 8000] [--workers N]` wraps uvicorn.
 
-Seed: `https://books.toscrape.com/`. Host delay **0.25** s, `--per-host 2`.
-Measured with `uv run python -m findex.bench_crawl`.
+## UI
 
-| Concurrency | Pages | Wall (s) | Pages/s | Errors | Peak RSS |
-|---|---|---|---|---|---|
-| 1 | 200 | 109.56 | 1.83 | 0 | 41.6 MiB |
-| 5 | 200 | 55.82 | 3.58 | 0 | 42.6 MiB |
-| 20 | 200 | 56.27 | 3.55 | 0 | 43.6 MiB |
+Dark sidebar layout. `GET /` - search box, highlighted snippets, scores,
+pagination, document page at `GET /doc/{doc_id}`. Optional **htmx** fragment at
+`/fragment/results` updates the result panel without a full reload.
 
-## Why concurrency 20 in one thread beats Lab 5 here
+## Tests
 
-Lab 5 was **CPU-bound** tokenization under the GIL: extra threads did not overlap
-useful work. This crawl is **I/O-bound**: most wall time is waiting for sockets.
-One event-loop thread parks a coroutine at `await client.get(...)` and schedules
-another. Overlapping waits cut wall time roughly in half from concurrency 1 → 5
-(1.83 → 3.58 pages/s) without twenty OS threads. RSS stays near **42–44 MiB**.
+`TestClient` + `dependency_overrides` (no real index file on disk for the suite):
 
-## Cost of the per-host limit (and why it stays)
+- search 200
+- bad `k` → 422
+- missing doc → 404
+- unloaded index → `/health` 503
 
-`--per-host 2` and `--host-delay 0.25` cap load on a single origin. Concurrency 5
-and 20 land at almost the same pages/s (**3.58** vs **3.55**) because the frontier is
-one host: the global semaphore can admit 20 tasks, but only two fetches overlap and
-each is followed by a 0.25 s pause. That leaves throughput on the table and is
-intentional — fewer 429s, and a crawl that looks like a client rather than a flood.
-The limit remains even when the allowlist already has a single hostname.
+## def vs async def
 
-## Where the loop would block if we indexed inline
+`/search` does CPU scoring. Kept as plain **`def`** so FastAPI runs it in a thread
+pool instead of blocking the event loop.
 
-Tokenizing and building postings is CPU work. Doing it inside a crawl worker
-(between `await`s) would hold the event loop for hundreds of milliseconds per page —
-every other in-flight request would stall. With `--debug`, asyncio would warn about
-a slow callback. That is why `findex crawl` only streams JSONL, and `findex index`
-runs afterward in ordinary synchronous code.
+20 concurrent requests (`scripts/bench_handlers.py`, `time.sleep(0.05)` as a
+blocking stand-in):
 
-## Handled failure (429 + Retry-After, and a live 404)
+| mode | wall |
+|---|---|
+| `async def` (blocks the loop) | **1.22 s** |
+| `def` (thread pool) | **0.76 s** |
 
-`pull` retries **429 / 5xx / timeouts** (max 3) with exponential backoff + jitter and
-honors `Retry-After`. Other 4xx are logged once and not retried.
+## Docker
 
-Live 404 (no retry — a single log line):
+Multi-stage image from `uv.lock`, non-root user, index baked at
+`/app/deploy/index.pkl`.
 
-```text
-https://books.toscrape.com/catalogue/this-page-does-not-exist-xyz/index.html	404	153	0.450	HTTP 404
+```bash
+docker build -t findex .
+docker run --rm -e INDEX_PATH=/app/deploy/index.pkl -p 8000:8000 findex
 ```
 
-Transient 429 path (MockTransport, same retry code as production) in
-[`data/failure_demo.log.txt`](data/failure_demo.log.txt):
+## Deploy
 
-```text
-https://books.toscrape.com/flaky	429	4	0.012	HTTP 429 (attempt 1, retry after Retry-After)
-https://books.toscrape.com/flaky	429	4	0.008	HTTP 429 (attempt 2, retry)
-https://books.toscrape.com/flaky	200	52	0.015	
-```
+1. HERE INSERT THE DEPLOY URL on the first line of this README.
+2. Env: `INDEX_PATH`, optional `PORT`, `LOG_LEVEL`.
+3. Platform health check: `/health`.
+4. Deployed load numbers: HERE INSERT DEPLOYED OHA / LOAD NUMBERS
 
-## Reflection (defence prompts)
+## Load test
 
-1. Why does overlapping waits beat Lab 5’s thread pool for this workload?
-2. What would `asyncio` debug report if `build_corpus` ran inside a crawl worker?
-3. Why did concurrency 20 not beat concurrency 5 on this single-host crawl?
+Client: `scripts/load_search.py` (same columns as `oha`: RPS, p50 / p95 / p99).
+Query `q=alice`, concurrency 20, 200 requests (local).
+
+| Target | RPS | p50 (ms) | p95 | p99 |
+|---|---|---|---|---|
+| local, 1 worker, `async def` (blocking stand-in; see handler bench) | ~8.6 | ~2200 | ~3100 | ~3400 |
+| local, 1 worker, `def` | **13.8** | **1388** | **2045** | **2217** |
+| local, 4 workers | **13.7** | **1417** | **1680** | **1780** |
+| deployed (HERE INSERT THE DEPLOY URL) | - | - | - | - |
+
+**Reading the table (labs 5-6):** a blocking `async def` parks the event loop
+(lab 6). Plain `def` offloads to a thread pool; the GIL (lab 5) still serializes
+bytecode in one process - which is why 4 workers barely moved RPS on this small
+index while p99 tightened a bit.
+
+## Reflection
+
+1. Trace curl → Uvicorn → ASGI → FastAPI → Pydantic → your route.
+2. Why is `/search` a `def`, and what breaks if it is a blocking `async def`?
+3. What should `/health` return before lifespan finishes loading the index?

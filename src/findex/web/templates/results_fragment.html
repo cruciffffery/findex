@@ -1,0 +1,29 @@
+{% if payload %}
+<p class="meta">{{ payload.total }} match{% if payload.total != 1 %}es{% endif %} · {{ "%.1f"|format(payload.took_ms) }} ms · page {{ payload.page }}</p>
+{% if payload.results %}
+<ol class="list" start="{{ (payload.page - 1) * payload.page_size + 1 }}">
+  {% for hit in payload.results %}
+  <li>
+    <div class="line">
+      <a href="/doc/{{ hit.doc_id }}">{{ hit.title }}</a>
+      <span class="score">{{ "%.4f"|format(hit.score) }}</span>
+    </div>
+    <p class="snip">{{ hit.snippet | mark | safe }}</p>
+  </li>
+  {% endfor %}
+</ol>
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}
+  <a href="/?q={{ q|urlencode }}&amp;k={{ k }}&amp;scorer={{ scorer }}&amp;page={{ page - 1 }}">Previous</a>
+  {% endif %}
+  <span>{{ page }} / {{ pages }}</span>
+  {% if page < pages %}
+  <a href="/?q={{ q|urlencode }}&amp;k={{ k }}&amp;scorer={{ scorer }}&amp;page={{ page + 1 }}">Next</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% else %}
+<p class="empty">Nothing matched that query.</p>
+{% endif %}
+{% endif %}

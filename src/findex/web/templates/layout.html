@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}findex{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <a class="logo" href="/">findex</a>
+      <p class="tag">corpus search</p>
+      <nav>
+        <a href="/">Search</a>
+        <a href="/docs">API</a>
+        <a href="/health">Health</a>
+        <a href="/stats">Stats</a>
+      </nav>
+    </aside>
+    <main class="stage">
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+  <footer class="foot">
+    <span>findex 0.7 · FastAPI + htmx</span>
+    <span>INDEX_PATH from environment</span>
+  </footer>
+</body>
+</html>

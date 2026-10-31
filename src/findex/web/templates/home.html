@@ -1,0 +1,31 @@
+{% extends "layout.html" %}
+{% block title %}{% if q %}{{ q }} — findex{% else %}findex search{% endif %}{% endblock %}
+{% block body %}
+  <header class="panel">
+    <h1>Look up a phrase</h1>
+    <p class="sub">BM25 / TF-IDF over the loaded index. OpenAPI lives at <a href="/docs">/docs</a>.</p>
+    <form class="bar" method="get" action="/" role="search"
+          hx-get="/fragment/results" hx-target="#live-results" hx-trigger="submit, keyup changed delay:350ms from:input[name=q]"
+          hx-include="[name='scorer'],[name='k']">
+      <input name="q" type="search" value="{{ q }}" placeholder="alice OR rabbit" maxlength="200" autofocus>
+      <div class="row">
+        <label>scorer
+          <select name="scorer">
+            <option value="bm25" {% if scorer == "bm25" %}selected{% endif %}>bm25</option>
+            <option value="tfidf" {% if scorer == "tfidf" %}selected{% endif %}>tfidf</option>
+          </select>
+        </label>
+        <label>k
+          <input name="k" type="number" min="1" max="100" value="{{ k }}">
+        </label>
+        <button type="submit">Go</button>
+      </div>
+    </form>
+  </header>
+
+  <section class="panel results" id="live-results">
+    {% if payload %}
+    {% include "results_fragment.html" %}
+    {% endif %}
+  </section>
+{% endblock %}
