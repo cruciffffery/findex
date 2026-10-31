@@ -1,20 +1,20 @@
-# findex — lab 05
+# findex — lab 06
 
 ![CI](https://img.shields.io/badge/CI-GitHub%20Actions-0A7A0A)
 
-Continues lab 04’s installable CLI. Parallel index build over **15** Gutenberg
-documents (Alice chapters + Frankenstein + Pride & Prejudice).
+Continues lab 05. Indexing was CPU-bound; crawling waits on the network, so one
+event-loop thread can keep many HTTP requests in flight.
 
 ```bash
 uv sync --all-groups
-findex index src/resources --out index.pkl --executor serial --workers 1
-findex index src/resources --out index.pkl --executor threads --workers 4
-findex index src/resources --out index.pkl --executor processes --workers 8
-uv run python -m findex.bench          # table + speedup.png
+findex crawl https://books.toscrape.com/ --max-pages 200 --concurrency 20 --per-host 2 --out data/crawl.jsonl --log crawl.log
+findex index data/crawl.jsonl --out index.pkl --executor serial
+findex search index.pkl "fiction" --k 5
+uv run python -m findex.bench_crawl
 uv run pytest
 ```
 
-Version **0.5.0**. Default `--executor` is **serial** on this machine (see below).
+Version **0.6.0**. Tag **`lab-06`** when you push.
 
 ## Continuity
 
@@ -22,110 +22,79 @@ Version **0.5.0**. Default `--executor` is **serial** on this machine (see below
 |-----|------|
 | 01–03 | corpus → inverted index → ranking |
 | 04 | types, pytest, typer/rich CLI |
-| 05 | `build_partial` / `merge_partials`, `--workers` / `--executor`, GIL benchmarks |
+| 05 | parallel index build, GIL benchmarks |
+| 06 | asyncio crawl (`TaskGroup`, semaphores, robots, retries) → JSONL → index |
 
-## Machine
+## Permission / ethics
 
-- **CPU:** 13th Gen Intel Core i5-13420H  
-- **Cores:** 12 (`os.cpu_count()`)  
-- **GIL-on interpreter:** CPython 3.12 (`sys._is_gil_enabled` missing → GIL on)  
-- **Free-threaded:** CPython 3.13.15t — `sys._is_gil_enabled()` → `False`
+Crawl target: **https://books.toscrape.com/** — a public practice bookstore built
+for scraping tutorials.
 
-Method: one warmup discarded, then **3 runs**; table cells are **medians**.
-Wall = `perf_counter` around `build_parallel`. CPU for threads = parent
-`process_time`; for processes = parent + worker CPU returned from each chunk.
-Peak RSS = parent working set sampled during the cell. Speedup = serial median
-wall ÷ cell wall.
+- `robots.txt` returns **404** on this host; empty rules → allow-all under
+  `urllib.robotparser` (still polite: allowlist, caps, delays).
+- User-Agent: `findex-crawler/0.6 (+mailto:crawl-lab@example.org; books.toscrape practice crawl)`
+- Allowlist: `books.toscrape.com` only
+- Cap: `--max-pages` (benchmarks use **200**)
+- Global concurrency + `--per-host` / `--host-delay` so one origin is not hammered
 
-## GIL on (Python 3.12)
+## Benchmark (same seed, max_pages=200)
 
-| Executor | Workers | Wall (s) | CPU (s) | Peak RSS | Merge (s) | Speedup |
-|----------|---------|----------|---------|----------|-----------|---------|
-| serial | 1 | 0.213 | 0.203 | 43.2 MiB | 0.005 | 1.00× |
-| threads | 1 | 0.212 | 0.203 | 44.9 MiB | 0.005 | 1.00× |
-| threads | 2 | 0.221 | 0.203 | 46.1 MiB | 0.006 | 0.96× |
-| threads | 4 | 0.221 | 0.219 | 46.2 MiB | 0.007 | 0.96× |
-| threads | 8 | 0.231 | 0.219 | 47.4 MiB | 0.016 | 0.92× |
-| threads | 12 | 0.231 | 0.219 | 47.8 MiB | 0.015 | 0.92× |
-| processes | 1 | 0.484 | 0.266 | 48.6 MiB | 0.017 | 0.44× |
-| processes | 2 | 0.457 | 0.266 | 47.2 MiB | 0.018 | 0.47× |
-| processes | 4 | 0.463 | 0.266 | 47.3 MiB | 0.020 | 0.46× |
-| processes | 8 | 0.484 | 0.297 | 47.4 MiB | 0.019 | 0.44× |
-| processes | 12 | 0.547 | 0.297 | 47.5 MiB | 0.018 | 0.39× |
+Seed: `https://books.toscrape.com/`. Host delay **0.25** s, `--per-host 2`.
+Measured with `uv run python -m findex.bench_crawl`.
 
-![Speedup with the GIL on](speedup.png)
+| Concurrency | Pages | Wall (s) | Pages/s | Errors | Peak RSS |
+|---|---|---|---|---|---|
+| 1 | 200 | 109.56 | 1.83 | 0 | 41.6 MiB |
+| 5 | 200 | 55.82 | 3.58 | 0 | 42.6 MiB |
+| 20 | 200 | 56.27 | 3.55 | 0 | 43.6 MiB |
 
-## Free-threaded 3.13t — `sys._is_gil_enabled()` is `False`
+## Why concurrency 20 in one thread beats Lab 5 here
 
-| Executor | Workers | Wall (s) | CPU (s) | Peak RSS | Merge (s) | Speedup |
-|----------|---------|----------|---------|----------|-----------|---------|
-| serial | 1 | 0.255 | 0.266 | 51.0 MiB | 0.005 | 1.00× |
-| threads | 1 | 0.257 | 0.266 | 80.1 MiB | 0.007 | 0.99× |
-| threads | 2 | 0.277 | 0.297 | 103.5 MiB | 0.008 | 0.92× |
-| threads | 4 | 0.260 | 0.297 | 104.2 MiB | 0.009 | 0.98× |
-| threads | 8 | 0.263 | 0.328 | 111.1 MiB | 0.011 | 0.97× |
-| threads | 12 | 0.255 | 0.297 | 123.9 MiB | 0.009 | 1.00× |
-| processes | 1 | 0.579 | 0.359 | 95.9 MiB | 0.007 | 0.44× |
-| processes | 2 | 0.547 | 0.375 | 98.0 MiB | 0.007 | 0.47× |
-| processes | 4 | 0.540 | 0.391 | 95.3 MiB | 0.008 | 0.47× |
-| processes | 8 | 0.585 | 0.469 | 93.5 MiB | 0.008 | 0.44× |
-| processes | 12 | 0.680 | 0.531 | 93.6 MiB | 0.008 | 0.37× |
+Lab 5 was **CPU-bound** tokenization under the GIL: extra threads did not overlap
+useful work. This crawl is **I/O-bound**: most wall time is waiting for sockets.
+One event-loop thread parks a coroutine at `await client.get(...)` and schedules
+another. Overlapping waits cut wall time roughly in half from concurrency 1 → 5
+(1.83 → 3.58 pages/s) without twenty OS threads. RSS stays near **42–44 MiB**.
 
-![Speedup with the GIL off](speedup_free.png)
+## Cost of the per-host limit (and why it stays)
 
-(PNG drawn from the free-threaded medians; 3.13t had no matplotlib wheel here.)
+`--per-host 2` and `--host-delay 0.25` cap load on a single origin. Concurrency 5
+and 20 land at almost the same pages/s (**3.58** vs **3.55**) because the frontier is
+one host: the global semaphore can admit 20 tasks, but only two fetches overlap and
+each is followed by a 0.25 s pause. That leaves throughput on the table and is
+intentional — fewer 429s, and a crawl that looks like a client rather than a flood.
+The limit remains even when the allowlist already has a single hostname.
 
-## Why the curves look like this
+## Where the loop would block if we indexed inline
 
-Indexing this corpus is about **0.2 s** of Python: read files, tokenize with
-positions, fill dicts. With the GIL, only one thread runs that bytecode at a
-time. Extra threads wait on the lock (~5 ms switch interval). The threads rows
-stay at **0.92–1.00×** — no real speedup, a little overhead. CPU time stays next
-to wall time: one core is busy.
+Tokenizing and building postings is CPU work. Doing it inside a crawl worker
+(between `await`s) would hold the event loop for hundreds of milliseconds per page —
+every other in-flight request would stall. With `--debug`, asyncio would warn about
+a slow callback. That is why `findex crawl` only streams JSONL, and `findex index`
+runs afterward in ordinary synchronous code.
 
-A process has its own interpreter and its own GIL, so tokenize loops *can*
-overlap. On a longer job that pays off. Here the job is short, and **spawn**
-starts a fresh interpreter plus pickles paths in and `PartialIndex` objects out.
-One process already costs **0.484 s** vs **0.213 s** serial (0.44×). Adding
-workers never recovers that tax on this corpus, so processes stay around
-**0.4–0.5×**. Parent RSS stays ~47 MiB; the copies live in children.
+## Handled failure (429 + Retry-After, and a live 404)
 
-Merge is **~0.005–0.020 s** — a few percent of serial wall. Amdahl says that
-serial tail caps speedup even with infinite cores
-(`1 / (f + (1−f)/N)`). On a 0.2 s job the **spawn/pickle tax** hits the ceiling
-first; merge is visible as a flat serial residual but is not yet the limiter.
+`pull` retries **429 / 5xx / timeouts** (max 3) with exponential backoff + jitter and
+honors `Retry-After`. Other 4xx are logged once and not retried.
 
-On **3.13.15 free-threaded**, `sys._is_gil_enabled()` is `False`. Single-thread
-work is a bit slower than 3.12 (0.255 s vs 0.213 s). Threads still do not beat
-serial on *this* short CPU burst (memory / coordination), but they no longer sit
-behind one lock — and the race demo changes (below). Processes keep the same
-pickle tax (~0.44×).
-
-**Race:** two threads each do `shared += 1` a million times.  
-GIL-on 3.12 printed `2000000` (got lucky — still not atomic).  
-Free-threaded printed **`1130064`**; with a `Lock`, **`2000000`**.  
-`+=` is load / add / store; without the GIL two cores overwrite each other.
-The indexer does **not** share that counter: each `build_partial` owns its
-dicts; `merge_partials` runs in the parent after the pool returns.
-
-**I/O counter-example:** 60 file reads — GIL-on `serial=0.0170s` /
-`threads=0.0203s` (pages cached; decode still holds the GIL). Free-threaded
-`serial=0.0134s` / `threads=0.0083s` — threads overlap decode once nothing waits
-on the lock.
-
-Because serial won here, **`--executor serial` is the default**. Use
-`--executor processes` when the corpus is large enough that tokenize time dwarfs
-spawn.
-
-## API sketch
+Live 404 (no retry — a single log line):
 
 ```text
-build_partial((paths, start_doc_id, with_positions)) -> PartialIndex   # module-level
-split_jobs(paths, workers, with_positions) -> list[ChunkJob]
-merge_partials(parts) -> Index
-build_parallel(paths, workers, executor, with_positions)
-findex index … --workers N --executor {serial,threads,processes}
+https://books.toscrape.com/catalogue/this-page-does-not-exist-xyz/index.html	404	153	0.450	HTTP 404
 ```
 
-Identity test: `merge_partials([build_partial(all_paths)])` equals lab-04-style
-`assemble(...)` (`tests/test_parallel.py`).
+Transient 429 path (MockTransport, same retry code as production) in
+[`data/failure_demo.log.txt`](data/failure_demo.log.txt):
+
+```text
+https://books.toscrape.com/flaky	429	4	0.012	HTTP 429 (attempt 1, retry after Retry-After)
+https://books.toscrape.com/flaky	429	4	0.008	HTTP 429 (attempt 2, retry)
+https://books.toscrape.com/flaky	200	52	0.015	
+```
+
+## Reflection (defence prompts)
+
+1. Why does overlapping waits beat Lab 5’s thread pool for this workload?
+2. What would `asyncio` debug report if `build_corpus` ran inside a crawl worker?
+3. Why did concurrency 20 not beat concurrency 5 on this single-host crawl?

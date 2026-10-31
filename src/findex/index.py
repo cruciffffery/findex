@@ -129,7 +129,7 @@ def assemble(
     lengths: dict[int, int] = {}
     meta: dict[int, DocMeta] = {}
 
-    for doc_id, path, text in walker.iter_docs():
+    for doc_id, path, text, title in walker.iter_docs_meta():
         if limit is not None and doc_id >= limit:
             break
         freq: Counter[str] = Counter()
@@ -142,7 +142,7 @@ def assemble(
                 offsets[term].append(offset)
 
         lengths[doc_id] = n_tokens
-        meta[doc_id] = DocMeta(str(path), path.stem)
+        meta[doc_id] = DocMeta(str(path), title or path.stem)
         for term, tf in freq.items():
             pos = tuple(offsets[term]) if offsets is not None else ()
             buckets[term].append(Posting(doc_id, tf, pos))
@@ -166,6 +166,15 @@ def build_corpus(
     workers: int = 1,
     executor: ExecutorName = "serial",
 ) -> Index:
+    # crawl JSONL is indexed serially outside the event loop
+    if corpus.is_file() and corpus.suffix.lower() == ".jsonl":
+        return assemble(
+            DocumentWalker(corpus),
+            WordStream(),
+            with_positions=with_positions,
+            limit=limit,
+            on_doc=on_doc,
+        )
     paths = sorted(corpus.glob("*.txt"))
     if limit is not None:
         paths = paths[:limit]
