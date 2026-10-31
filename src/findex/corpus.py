@@ -5,7 +5,6 @@ from pathlib import Path
 
 
 class DocumentWalker:
-
     def __init__(self, folder: str | Path) -> None:
         self._folder = Path(folder)
 

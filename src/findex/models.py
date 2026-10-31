@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 
 
@@ -33,17 +33,22 @@ class SearchResult:
     snippet: str = field(compare=False)
 
 
-class Index(Mapping):
+class Index(Mapping[str, list[Posting]]):
     # not frozen: cached_property stores avg_doc_length on the instance
-    def __init__(self, postings, doc_lengths, doc_meta):
+    def __init__(
+        self,
+        postings: dict[str, list[Posting]],
+        doc_lengths: dict[int, int],
+        doc_meta: dict[int, DocMeta],
+    ) -> None:
         self.postings = postings
         self.doc_lengths = doc_lengths
         self.doc_meta = doc_meta
 
-    def __getitem__(self, term: str):
+    def __getitem__(self, term: str) -> list[Posting]:
         return self.postings[term]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self.postings)
 
     def __len__(self) -> int:
@@ -52,7 +57,7 @@ class Index(Mapping):
     def __repr__(self) -> str:
         return f"Index(terms={len(self):_}, docs={self.num_docs:_})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Index):
             return NotImplemented
         return (
@@ -67,6 +72,8 @@ class Index(Mapping):
 
     @functools.cached_property
     def avg_doc_length(self) -> float:
+        if self.num_docs == 0:
+            return 0.0
         return sum(self.doc_lengths.values()) / self.num_docs
 
     def doc_length(self, doc_id: int) -> int:

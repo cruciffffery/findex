@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 from findex.models import DocMeta, Index, Posting
 from findex.query import And, Not, Or, Phrase, Term, parse
 
 
-def test_or_binds_looser_than_and():
+def test_or_binds_looser_than_and() -> None:
     assert parse("a OR b c") == Or(Term("a"), And(Term("b"), Term("c")))
 
 
-def test_parens_not_and_phrase():
+def test_parens_not_and_phrase() -> None:
     got = parse('python AND (async OR await) NOT java "event loop"')
     expect = And(
         And(
@@ -18,7 +20,7 @@ def test_parens_not_and_phrase():
     assert got == expect
 
 
-def test_operators_build_the_same_tree():
+def test_operators_build_the_same_tree() -> None:
     built = Term("python") & (Term("async") | Term("await")) & ~Term("java")
     assert built == And(
         And(Term("python"), Or(Term("async"), Term("await"))),
@@ -26,7 +28,7 @@ def test_operators_build_the_same_tree():
     )
 
 
-def test_phrase_needs_adjacent_positions():
+def test_phrase_needs_adjacent_positions() -> None:
     postings = {
         "event": [Posting(0, 1, (3,)), Posting(1, 1, (1,))],
         "loop": [Posting(0, 1, (4,)), Posting(1, 1, (8,))],
@@ -34,3 +36,11 @@ def test_phrase_needs_adjacent_positions():
     meta = {i: DocMeta(str(i), str(i)) for i in range(2)}
     index = Index(postings, {0: 5, 1: 9}, meta)
     assert Phrase(("event", "loop")).evaluate(index) == {0}
+
+
+def test_empty_query_raises() -> None:
+    try:
+        parse("   ")
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError")

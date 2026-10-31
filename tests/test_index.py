@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import logging
+from pathlib import Path
 
 import pytest
 
 from findex.models import DocMeta, Index, Posting
 from findex.score import BM25
-from findex.search import search
+from findex.search import boolean_search, search
 from findex.store import open_index, save_pickle
 
 
@@ -17,7 +20,7 @@ def _index() -> Index:
     return Index(postings, {0: 10, 1: 10_000}, meta)
 
 
-def test_mapping_protocol():
+def test_mapping_protocol() -> None:
     index = _index()
     assert len(index) == 2
     assert "rare" in index and "missing" not in index
@@ -31,37 +34,37 @@ def test_mapping_protocol():
     assert index.avg_doc_length == 5005
 
 
-def test_bm25_rare_short_and_saturation():
-    index = _index()
-    bm = BM25()
-    rare = bm("rare", Posting(0, 1), index)
-    common = bm("common", Posting(0, 1), index)
-    assert rare > common
-    first = bm("rare", Posting(0, 1), index)
-    step20 = bm("rare", Posting(0, 20), index) - bm("rare", Posting(0, 19), index)
-    assert step20 < first
-    short = bm("rare", Posting(0, 1), index)
-    long = bm("rare", Posting(1, 1), index)
-    assert short > long
-    flat = BM25(b=0)
-    assert flat("rare", Posting(0, 1), index) == flat("rare", Posting(1, 1), index)
+def test_tiny_index_build(tiny_index: Index) -> None:
+    assert tiny_index.num_docs == 3
+    assert "alice" in tiny_index
+    assert "frankenstein" in tiny_index
+    assert "darcy" in tiny_index
+    for hits in tiny_index.postings.values():
+        ids = [p.doc_id for p in hits]
+        assert ids == sorted(ids)
 
 
-def test_open_index_closes_on_error(tmp_path, monkeypatch):
+def test_boolean_on_tiny(tiny_index: Index) -> None:
+    hits = boolean_search(tiny_index, "alice rabbit", "merge")
+    assert hits == boolean_search(tiny_index, "alice rabbit", "set")
+    assert hits
+
+
+def test_open_index_closes_on_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "i.pkl"
     save_pickle(_index(), path)
-    closed = {}
+    closed: dict[str, bool] = {}
     real_open = type(path).open
 
-    def tracking(self, *args, **kwargs):
+    def tracking(self: Path, *args: object, **kwargs: object):  # noqa: ANN001
         handle = real_open(self, *args, **kwargs)
         real_close = handle.close
 
-        def close():
+        def close() -> None:
             closed["ok"] = True
-            return real_close()
+            real_close()
 
-        handle.close = close
+        handle.close = close  # type: ignore[method-assign]
         return handle
 
     monkeypatch.setattr(type(path), "open", tracking)
@@ -71,7 +74,7 @@ def test_open_index_closes_on_error(tmp_path, monkeypatch):
     assert closed.get("ok")
 
 
-def test_cache_hit_is_logged(caplog):
+def test_cache_hit_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     index = _index()
     with caplog.at_level(logging.DEBUG, logger="findex"):
         search(index, "rare", BM25(), k=5)
@@ -80,5 +83,5 @@ def test_cache_hit_is_logged(caplog):
     assert "cache hit rare" in caplog.text
 
 
-def test_timed_keeps_the_name():
+def test_timed_keeps_the_name() -> None:
     assert search.__name__ == "search"

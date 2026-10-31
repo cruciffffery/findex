@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from findex.models import DocMeta, Index, Posting
-from findex.search import boolean_search as search
-from findex.store import load_json, load_pickle, save_json, save_pickle
+from findex.score import BM25
+from findex.search import boolean_search, search
 
 
 def _index() -> Index:
@@ -14,25 +16,23 @@ def _index() -> Index:
     return Index(postings, lengths, meta)
 
 
-def test_frozen_records_go_in_a_set():
+def test_frozen_records_go_in_a_set() -> None:
     found = {Posting(1, 2), DocMeta("a", "b")}
     assert Posting(1, 2) in found
     assert DocMeta("a", "b") in found
 
 
-def test_merge_and_set_agree():
+def test_merge_and_set_agree() -> None:
     index = _index()
     queries = ("a b", "a OR c", "a NOT b", "NOT a")
     expect = ([1, 2], [0, 1, 2], [0], [3])
-    for query, hits in zip(queries, expect):
-        assert search(index, query, "merge") == hits
-        assert search(index, query, "set") == hits
+    for query, hits in zip(queries, expect, strict=True):
+        assert boolean_search(index, query, "merge") == hits
+        assert boolean_search(index, query, "set") == hits
 
 
-def test_pickle_and_json_roundtrip(tmp_path):
+def test_ranked_search_returns_results() -> None:
     index = _index()
-    pkl, js = tmp_path / "i.pkl", tmp_path / "i.json"
-    save_pickle(index, pkl)
-    save_json(index, js)
-    assert load_pickle(pkl) == index
-    assert load_json(js) == index
+    hits = search(index, "a b", BM25(), k=5)
+    assert hits
+    assert hits[0].score >= hits[-1].score

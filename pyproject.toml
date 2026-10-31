@@ -1,12 +1,25 @@
 [project]
 name = "findex"
-version = "0.3.0"
-description = "Ranked search, query language, and Index object model"
+version = "0.4.0"
+description = "Typed, tested, installable corpus search CLI"
+readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.scripts]
+findex = "findex.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "pyright>=1.1",
+    "ruff>=0.6",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -18,3 +31,28 @@ packages = ["src/findex"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = ["slow: tests that take more than about one second"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["findex"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

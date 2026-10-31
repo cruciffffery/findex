@@ -1,34 +1,34 @@
+from __future__ import annotations
+
+import pytest
+
 from findex.tokenize import WordStream, tokenize
 
 
-def test_unicode_fold_and_case():
-    assert list(tokenize("CAFÉ")) == ["café"]
-    assert list(WordStream().tokenize("Ａｌｉｃｅ")) == ["alice"]
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("CAFÉ", ["café"]),
+        ("Ａｌｉｃｅ", ["alice"]),
+        ("don't", ["don't"]),
+        ("it's", ["it's"]),
+        ("good-for-nothing", ["good-for-nothing"]),
+        ("number 4 and 1991", ["number", "4", "and", "1991"]),
+        ("Hello, world!", ["hello", "world"]),
+        ("", []),
+        ("... --- !!!", []),
+    ],
+)
+def test_tokenize_cases(text: str, expected: list[str]) -> None:
+    assert list(tokenize(text)) == expected
 
 
-def test_apostrophes_stay_inside():
-    assert list(tokenize("don't")) == ["don't"]
-    assert list(tokenize("it's")) == ["it's"]
+def test_wordstream_matches_tokenize() -> None:
+    sample = "Alice's Adventures"
+    assert list(WordStream().tokenize(sample)) == list(tokenize(sample))
 
 
-def test_hyphen_glues_parts():
-    assert list(tokenize("good-for-nothing")) == ["good-for-nothing"]
-
-
-def test_digits_survive():
-    assert list(tokenize("number 4 and 1991")) == ["number", "4", "and", "1991"]
-
-
-def test_punctuation_is_boundary():
-    assert list(tokenize("Hello, world!")) == ["hello", "world"]
-
-
-def test_blank_input():
-    assert list(tokenize("")) == []
-    assert list(tokenize("... --- !!!")) == []
-
-
-def test_lazy_yield():
+def test_lazy_yield() -> None:
     it = tokenize("a b c")
     assert next(it) == "a"
     assert list(it) == ["b", "c"]

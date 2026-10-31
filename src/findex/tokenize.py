@@ -10,12 +10,11 @@ _TOKEN = re.compile(r"[^\W_]+(?:[''\u2019\u02bc\-][^\W_]+)*", re.UNICODE)
 
 
 def tokenize(text: str) -> Iterator[str]:
-    text = unicodedata.normalize("NFKC", text).casefold()
-    for match in _TOKEN.finditer(text):
+    folded = unicodedata.normalize("NFKC", text).casefold()
+    for match in _TOKEN.finditer(folded):
         yield match.group(0)
 
 
 class WordStream:
-
     def tokenize(self, text: str) -> Iterator[str]:
         return tokenize(text)

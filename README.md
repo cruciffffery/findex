@@ -1,96 +1,72 @@
-# findex — lab 03
+# findex — lab 04
 
-Continues lab 02’s inverted index. Ranked search over `src/resources/*.txt` —
-**one `.txt` file = one document** (Alice, Frankenstein, Pride & Prejudice).
-Adds `Index` as a Mapping, BM25/TF-IDF, query AST, snippets, `@timed` / cache.
+![CI](https://img.shields.io/badge/CI-GitHub%20Actions-0A7A0A)
+
+Installable CLI on top of the ranked index from labs 01–03. Same Gutenberg corpus
+(`alice_in_wonderland`, `frankenstein`, `pride_and_prejudice`).
 
 ```bash
-uv sync --group dev
-uv run python src/main.py
+uv sync --all-groups
+uv tool install .
+findex --help
+findex index src/resources --out index.pkl
+findex search index.pkl "elizabeth darcy" --scorer bm25
+findex search index.pkl "alice OR creature" --json
+findex stats src/resources
+uv run pytest --cov=findex
+uv build   # → dist/findex-0.4.0-*.whl
 ```
 
-`main.py` builds the index, prints the checks below, then runs the demo query twice
-inside `with open_index`.
+Version **0.4.0**. Tag for the course deliverable: `lab-04` / release `v0.4.0`.
 
-## Index
+## Continuity (labs 01 → 04)
 
-`WITH_POSITIONS = True`. One build:
+| lab | adds |
+|-----|------|
+| 01 | streaming `tokenize` + corpus stats |
+| 02 | inverted index, boolean merge, pickle/json |
+| 03 | `Index` object model, BM25/TF-IDF, query AST, snippets |
+| 04 | types (pyright strict), pytest+Hypothesis, typer/rich CLI, CI |
 
-`Index(terms=11_566, docs=3)` — 238869 tokens, 0.9396 s, peak 19273.1 KiB.
+## What this lab adds
 
-## Ranking checks (BM25, k1=1.5, b=0.75)
+| piece | where |
+|-------|--------|
+| `Scorer` as `typing.Protocol` | `src/findex/score.py` |
+| pyright **strict**, 0 errors | `[tool.pyright]` |
+| typer + rich CLI | `src/findex/cli.py` → `[project.scripts] findex` |
+| ≥30 pytest + Hypothesis | `tests/` (50 collected) |
+| logging to stderr (`-v` / `-vv`) | CLI callback |
+| GitHub Actions | `.github/workflows/ci.yml` (ruff, pyright, pytest) |
 
-Same tf and the same document length. Only `df` changes. `cheshire` is in one book,
-`elizabeth` in two.
+## Coverage
 
-| term | df | weight at tf=1 |
-|------|----|----------------|
-| cheshire | 1 | 1.5295 |
-| elizabeth | 2 | 0.5645 |
+`uv run pytest --cov=findex --cov-report=term-missing`:
 
-The rare term weighs more.
+| metric | value |
+|--------|-------|
+| tests | **50 passed** |
+| line+branch coverage | **92%** |
 
-Marginal gain for `cheshire` on the shortest document’s length. The 20th occurrence
-adds 0.0053; the first added 1.5295.
+Intentionally thin / out of coverage:
 
-| tf | weight | step from tf−1 |
-|----|--------|----------------|
-| 1 | 1.5295 | 1.5295 |
-| 2 | 1.9648 | 0.4353 |
-| 20 | 2.6414 | 0.0053 |
-| 21 | 2.6463 | 0.0048 |
+- some CLI error branches (missing corpus, OS failures)
+- full-corpus precision@5 demo from lab 03 (use `findex search` instead)
+- release upload of the wheel (manual `v0.4.0` GitHub Release step)
 
-Same term, tf 1. The short book wins at `b=0.75`. At `b=0` the length term drops out
-and the weights match.
+## CLI behaviour
 
-| document | tokens | b=0.75 | b=0 |
-|----------|--------|--------|-----|
-| alice_in_wonderland | 29773 | 1.5295 | 1.0986 |
-| pride_and_prejudice | 130791 | 0.8522 | 1.0986 |
+- Diagnostics → **stderr**; table / `--json` → **stdout**
+- Missing index / bad query → one clear line, nonzero exit, no traceback
+- `findex index` — rich progress while walking documents
+- `findex search` — rich table; `--json` emits one JSON object per line
+- `findex stats` — document / token / vocab table + top terms
 
-## precision@5
-
-Ten hand-labeled queries. A hit counts when the labeled book is in the top 5.
-Precision divides by 5. Each query has one labeled book and that book is the only
-hit, so every cell is 1/5 = 0.20. Three documents cannot push a retrieved hit past
-rank 5, so TF-IDF and BM25 tie.
-
-| query | TF-IDF | BM25 |
-|-------|--------|------|
-| alice | 0.20 | 0.20 |
-| hatter | 0.20 | 0.20 |
-| cheshire | 0.20 | 0.20 |
-| "white rabbit" | 0.20 | 0.20 |
-| frankenstein | 0.20 | 0.20 |
-| walton | 0.20 | 0.20 |
-| creature | 0.20 | 0.20 |
-| elizabeth | 0.20 | 0.20 |
-| darcy | 0.20 | 0.20 |
-| "pride and prejudice" | 0.20 | 0.20 |
-| **mean** | **0.20** | **0.20** |
-
-## @timed and cache
-
-`logging` at DEBUG. `assemble`, `load_pickle`, `_unpickle`, and `search` log milliseconds.
-The demo query runs twice on the loaded index. The second call logs `cache hit` and
-`CacheInfo(hits=1, misses=1)`.
+## Tooling check (local)
 
 ```text
-assemble took 939.3 ms
-_unpickle took 36.7 ms
-cache miss (frankenstein OR hatter) AND alice NOT darcy "white rabbit"
-search took 1.5 ms
-cache hit (frankenstein OR hatter) AND alice NOT darcy "white rabbit"
-search took 1.4 ms
-cache CacheInfo(hits=1, misses=1, maxsize=256, currsize=1)
+ruff check          → All checks passed
+pyright (strict)    → 0 errors
+pytest              → 50 passed, 92% coverage
+uv build            → dist/findex-0.4.0-py3-none-any.whl
 ```
-
-## Demo query
-
-`(frankenstein OR hatter) AND alice NOT darcy "white rabbit"` with BM25.
-Frankenstein and Pride drop out; only Alice matches the conjunction + phrase.
-Snippets are ±80 characters; matched terms are in `[brackets]`.
-
-| rank | score | title | snippet |
-|------|-------|-------|---------|
-| 1 | 8.1460 | alice_in_wonderland | …The Project Gutenberg eBook of [Alice]'s Adventures in Wonderland… |

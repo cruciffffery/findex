@@ -1,24 +1,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from findex.models import Index
 from findex.tokenize import tokenize
 
 
-class _Node:
-    def __and__(self, other):
-        return And(self, other)
+class QueryNode(Protocol):
+    def evaluate(self, index: Index) -> set[int]: ...
 
-    def __or__(self, other):
-        return Or(self, other)
 
-    def __invert__(self):
-        return Not(self)
+class _Ops:
+    def __and__(self, other: QueryNode) -> And:
+        return And(self, other)  # type: ignore[arg-type]  # self is Term|Phrase|And|Or|Not at runtime
+
+    def __or__(self, other: QueryNode) -> Or:
+        return Or(self, other)  # type: ignore[arg-type]
+
+    def __invert__(self) -> Not:
+        return Not(self)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True)
-class Term(_Node):
+class Term(_Ops):
     value: str
 
     def evaluate(self, index: Index) -> set[int]:
@@ -28,39 +33,41 @@ class Term(_Node):
 
 
 @dataclass(frozen=True)
-class Phrase(_Node):
+class Phrase(_Ops):
     words: tuple[str, ...]
 
     def evaluate(self, index: Index) -> set[int]:
         # next word must sit at position p + 1
         if any(word not in index for word in self.words):
             return set()
-        by_doc = [{hit.doc_id: hit.positions for hit in index[word]} for word in self.words]
-        shared = set.intersection(*(set(col) for col in by_doc))
+        by_doc: list[dict[int, tuple[int, ...]]] = [
+            {hit.doc_id: hit.positions for hit in index[word]} for word in self.words
+        ]
+        shared: set[int] = set(by_doc[0]).intersection(*(set(col) for col in by_doc[1:]))
         return {doc_id for doc_id in shared if _phrase_holds(by_doc, doc_id)}
 
 
 @dataclass(frozen=True)
-class And(_Node):
-    left: object
-    right: object
+class And(_Ops):
+    left: QueryNode
+    right: QueryNode
 
     def evaluate(self, index: Index) -> set[int]:
         return self.left.evaluate(index) & self.right.evaluate(index)
 
 
 @dataclass(frozen=True)
-class Or(_Node):
-    left: object
-    right: object
+class Or(_Ops):
+    left: QueryNode
+    right: QueryNode
 
     def evaluate(self, index: Index) -> set[int]:
         return self.left.evaluate(index) | self.right.evaluate(index)
 
 
 @dataclass(frozen=True)
-class Not(_Node):
-    child: object
+class Not(_Ops):
+    child: QueryNode
 
     def evaluate(self, index: Index) -> set[int]:
         return set(index.doc_meta) - self.child.evaluate(index)
@@ -91,7 +98,8 @@ def _phrase_holds(by_doc: list[dict[int, tuple[int, ...]]], doc_id: int) -> bool
     return True
 
 
-def _lex(query: str):
+def _lex(query: str) -> list[tuple[str, str]]:
+    tokens: list[tuple[str, str]] = []
     i = 0
     n = len(query)
     while i < n:
@@ -100,28 +108,29 @@ def _lex(query: str):
             i += 1
             continue
         if ch in "()":
-            yield ("op", ch)
+            tokens.append(("op", ch))
             i += 1
             continue
         if ch == '"':
             j = query.find('"', i + 1)
             if j < 0:
                 j = n
-            yield ("phrase", query[i + 1 : j])
+            tokens.append(("phrase", query[i + 1 : j]))
             i = j + 1
             continue
         j = i
-        while j < n and not query[j].isspace() and query[j] not in '()\"':
+        while j < n and not query[j].isspace() and query[j] not in '()"':
             j += 1
-        yield ("word", query[i:j])
+        tokens.append(("word", query[i:j]))
         i = j
+    return tokens
 
 
-def _is_kw(tok, *names: str) -> bool:
+def _is_kw(tok: tuple[str, str] | None, *names: str) -> bool:
     return bool(tok) and tok[0] == "word" and tok[1].upper() in names
 
 
-def _leaf(tok):
+def _leaf(tok: tuple[str, str]) -> Term | Phrase:
     if tok[0] == "phrase":
         words = tuple(tokenize(tok[1]))
         if len(words) > 1:
@@ -130,20 +139,25 @@ def _leaf(tok):
     return Term(tok[1].casefold())
 
 
-def parse(query: str):
-    tokens = list(_lex(query))
+Node = Term | Phrase | And | Or | Not
+
+
+def parse(query: str) -> Node:
+    tokens = _lex(query)
+    if not tokens:
+        raise ValueError("empty query")
     cursor = 0
 
-    def peek():
+    def peek() -> tuple[str, str] | None:
         return tokens[cursor] if cursor < len(tokens) else None
 
-    def take():
+    def take() -> tuple[str, str]:
         nonlocal cursor
         tok = tokens[cursor]
         cursor += 1
         return tok
 
-    def atom():
+    def atom() -> Node:
         tok = take()
         if tok == ("op", "("):
             node = parse_or()
@@ -152,16 +166,14 @@ def parse(query: str):
             return node
         return _leaf(tok)
 
-    def parse_not():
-        # NOT binds only the next atom
+    def parse_not() -> Node:
         if _is_kw(peek(), "NOT"):
             take()
             return Not(atom())
         return atom()
 
-    def parse_and():
-        # a missing AND is still AND
-        node = parse_not()
+    def parse_and() -> Node:
+        node: Node = parse_not()
         while True:
             tok = peek()
             if tok is None or tok == ("op", ")") or _is_kw(tok, "OR"):
@@ -169,9 +181,10 @@ def parse(query: str):
             if _is_kw(tok, "AND"):
                 take()
             node = node & parse_not()
+        return node
 
-    def parse_or():
-        node = parse_and()
+    def parse_or() -> Node:
+        node: Node = parse_and()
         while _is_kw(peek(), "OR"):
             take()
             node = node | parse_and()
@@ -180,11 +193,13 @@ def parse(query: str):
     return parse_or()
 
 
-def query_terms(node) -> list[str]:
+def query_terms(node: object) -> list[str]:
     if isinstance(node, Term):
         return [node.value]
     if isinstance(node, Phrase):
         return list(node.words)
     if isinstance(node, Not):
         return []
-    return query_terms(node.left) + query_terms(node.right)
+    if isinstance(node, (And, Or)):
+        return query_terms(node.left) + query_terms(node.right)
+    return []
