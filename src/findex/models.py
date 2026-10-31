@@ -33,6 +33,13 @@ class SearchResult:
     snippet: str = field(compare=False)
 
 
+@dataclass(frozen=True, slots=True)
+class PartialIndex:
+    postings: dict[str, list[Posting]]
+    doc_lengths: dict[int, int]
+    doc_meta: dict[int, DocMeta]
+
+
 class Index(Mapping[str, list[Posting]]):
     # not frozen: cached_property stores avg_doc_length on the instance
     def __init__(
