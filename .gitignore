@@ -1,0 +1,21 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.hypothesis/
+.benchmarks/
+dist/
+build/
+*.egg-info/
+
+# Secrets
+.env
+
+# Corpus and generated artifacts (not versioned)
+data/
+/index.pkl
