@@ -1,6 +1,7 @@
 # findex - lab 07
 
-**Live deploy URL:** HERE INSERT THE DEPLOY URL
+**Live deploy URL:** https://findex-z347.onrender.com  
+(Render free tier: the first request after ~15 min idle takes about a minute to wake up. API docs: https://findex-z347.onrender.com/docs, health: https://findex-z347.onrender.com/health)
 
 HTTP search API + browse UI. Version **0.7.0**. Tag **`lab-07`** when you push.
 
@@ -80,10 +81,10 @@ docker run --rm -e INDEX_PATH=/app/deploy/index.pkl -p 8000:8000 findex
 
 ## Deploy
 
-1. HERE INSERT THE DEPLOY URL on the first line of this README.
+1. Deployed on Render (Docker): https://findex-z347.onrender.com
 2. Env: `INDEX_PATH`, optional `PORT`, `LOG_LEVEL`.
 3. Platform health check: `/health`.
-4. Deployed load numbers: HERE INSERT DEPLOYED OHA / LOAD NUMBERS
+4. Deployed load numbers: see the last row of the table below.
 
 ## Load test
 
@@ -95,7 +96,7 @@ Query `q=alice`, concurrency 20, 200 requests (local).
 | local, 1 worker, `async def` (blocking stand-in; see handler bench) | ~8.6 | ~2200 | ~3100 | ~3400 |
 | local, 1 worker, `def` | **13.8** | **1388** | **2045** | **2217** |
 | local, 4 workers | **13.7** | **1417** | **1680** | **1780** |
-| deployed (HERE INSERT THE DEPLOY URL) | - | - | - | - |
+| deployed (https://findex-z347.onrender.com, Render free 0.1 CPU) | **16.2** | **1202** | **1718** | **2006** |
 
 **Reading the table (labs 5-6):** a blocking `async def` parks the event loop
 (lab 6). Plain `def` offloads to a thread pool; the GIL (lab 5) still serializes
