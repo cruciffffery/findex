@@ -11,4 +11,4 @@ jobs:
       - run: uv sync --all-groups
       - run: uv run pytest --benchmark-disable
       - name: benchmarks
-        run: uv run pytest tests/test_benchmark.py --benchmark-only --benchmark-min-rounds=3
+           run: uv run pytest tests/test_benchmark.py -o addopts="-q" --benchmark-only --benchmark-min-rounds=3
