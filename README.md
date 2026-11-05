@@ -1,6 +1,7 @@
 # findex
 
-**Live deploy URL:** HERE INSERT THE DEPLOY URL
+**Live deploy URL:** https://findex-z347.onrender.com  
+(Render free tier: the first request after ~15 min idle takes about a minute while the service wakes up. Health: https://findex-z347.onrender.com/health, API docs: https://findex-z347.onrender.com/docs)
 
 One sentence: a searchable inverted index with NumPy BM25, optional MiniLM
 semantics, hybrid RRF, and a FastAPI page anyone can open.
@@ -11,10 +12,13 @@ semantics, hybrid RRF, and a FastAPI page anyone can open.
 
 Version **1.0.0**. Public GitHub tags: **`lab-08`** and **`v1.0.0`**.
 
-**GIF (search UI):** HERE INSERT THE DEMO GIF  
-(placeholder file: `docs/demo.gif` - replace with a real screen capture)
+**GIF (search UI on the deployed service):**
 
-**Demo video (2-3 min):** HERE INSERT THE DEMO VIDEO URL
+![findex search demo](docs/demo.gif)
+
+**Demo video (~2.5 min, deployed service):** [docs/findex_demo.mp4](docs/findex_demo.mp4)
+
+**Live demo:** open https://findex-z347.onrender.com, type `alice AND rabbit`, mode `keyword`, press Go.
 
 ```mermaid
 flowchart LR
@@ -115,7 +119,7 @@ Free-threaded 3.13t still no clear win here (short jobs).
 
 Load (`scripts/load_search.py`, c=20, n=200, 1 worker `def`): RPS **13.8**, p50 **1388** ms, p95 **2045** ms, p99 **2217** ms.
 
-Deployed load row: HERE INSERT DEPLOYED OHA / LOAD NUMBERS
+Deployed (Render free, 0.1 CPU / 512 MB, browser-side load script, c=20, n=200, `/search?q=alice&k=10`): RPS **16.2**, p50 **1202** ms, p95 **1718** ms, p99 **2006** ms, 0 failures.
 
 ### Lab 8 - NumPy speedup
 
@@ -131,7 +135,7 @@ Full table: [`docs/numpy_speedup.md`](docs/numpy_speedup.md)
 Tiny lists: overhead dominates (speedup under 1x). Long lists: ufuncs win.
 
 Precision@5 keyword / semantic / hybrid (+ paraphrases): [`docs/precision_at_5.md`](docs/precision_at_5.md).  
-Exact cells after `findex embed`: HERE INSERT PRECISION TABLE RESULTS IF RE-RUN
+Numbers for the semantic/hybrid columns are in that file (computed locally with MiniLM).
 
 ## Limitations
 
@@ -139,13 +143,14 @@ Exact cells after `findex embed`: HERE INSERT PRECISION TABLE RESULTS IF RE-RUN
 - Brute-force `E @ q` is fine under ~1e5 chunks; then HNSW/FAISS.
 - Snippets still hit disk unless text is cached at load.
 - Without embeddings, semantic/hybrid stay disabled.
+- On the Render free tier (512 MB RAM) only `keyword` mode is usable: loading the MiniLM model for `semantic`/`hybrid` exceeds the memory limit. Semantic and hybrid work locally (`findex serve --embeddings deploy/embeddings.npy`).
 - py-spy may fail on some Windows hosts - keep the cProfile flame in `docs/`.
 
 ## Deploy checklist
 
 See **[DEPLOY.md](DEPLOY.md)** for the full Render setup.
 
-1. HERE INSERT THE DEPLOY URL at the top of this file.
+1. Deployed at https://findex-z347.onrender.com (URL at the top of this file).
 2. GitHub main must include this code (and ideally deploy/embeddings.npy).
 3. Render: Language **Docker**, health /health.
 4. Env: INDEX_PATH=/app/deploy/index.pkl, EMBEDDINGS_PATH=/app/deploy/embeddings.npy, LOG_LEVEL=INFO (do not hardcode PORT).
@@ -155,7 +160,7 @@ See **[DEPLOY.md](DEPLOY.md)** for the full Render setup.
 
 Prepared talking points:
 
-1. **Live demo** - open the deploy URL (or local `findex serve`), search keyword then hybrid.
+1. **Live demo** - open https://findex-z347.onrender.com (or local `findex serve`), search keyword then hybrid.
 2. **One measurement to show** - NumPy **9.9x** on 40k synthetic postings (`docs/numpy_speedup.md`), and why the 15-doc rows are under 1x.
 3. **One bug that taught something** - snippet I/O dominating the profile while BM25 looked "slow" until cProfile separated Python vs disk.
 4. **Reflection (pick 2-3):**
